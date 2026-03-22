@@ -2,9 +2,11 @@ package proxy
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"sync"
+	"time"
 )
 
 // LogLevel represents log severity
@@ -22,7 +24,24 @@ const (
 var (
 	currentLevel = LevelInfo
 	mu           sync.Mutex
+	logFile      io.Writer = os.Stdout
 )
+
+// SetLogFile sets the log file output
+func SetLogFile(path string) {
+	if path == "" {
+		logFile = os.Stdout
+		return
+	}
+
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[ERROR] Failed to open log file %s: %v\n", path, err)
+		logFile = os.Stdout
+		return
+	}
+	logFile = file
+}
 
 // SetLogLevel sets the current log level
 func SetLogLevel(level string) {
@@ -72,41 +91,71 @@ func shouldLog(level LogLevel) bool {
 // trace prints trace-level messages
 func trace(format string, args ...interface{}) {
 	if shouldLog(LevelTrace) {
-		fmt.Printf("[TRACE] "+format+"\n", args...)
+		timestamp := time.Now().Format(time.RFC3339)
+		msg := fmt.Sprintf("[%s] [TRACE] "+format+"\n", append([]interface{}{timestamp}, args...)...)
+		mu.Lock()
+		fmt.Print(msg)
+		logFile.Write([]byte(msg))
+		mu.Unlock()
 	}
 }
 
 // debug prints debug-level messages
 func debug(format string, args ...interface{}) {
 	if shouldLog(LevelDebug) {
-		fmt.Printf("[DEBUG] "+format+"\n", args...)
+		timestamp := time.Now().Format(time.RFC3339)
+		msg := fmt.Sprintf("[%s] [DEBUG] "+format+"\n", append([]interface{}{timestamp}, args...)...)
+		mu.Lock()
+		fmt.Print(msg)
+		logFile.Write([]byte(msg))
+		mu.Unlock()
 	}
 }
 
 // info prints info-level messages
 func info(format string, args ...interface{}) {
 	if shouldLog(LevelInfo) {
-		fmt.Printf("[INFO] "+format+"\n", args...)
+		timestamp := time.Now().Format(time.RFC3339)
+		msg := fmt.Sprintf("[%s] [INFO] "+format+"\n", append([]interface{}{timestamp}, args...)...)
+		mu.Lock()
+		fmt.Print(msg)
+		logFile.Write([]byte(msg))
+		mu.Unlock()
 	}
 }
 
 // warn prints warning-level messages
 func warn(format string, args ...interface{}) {
 	if shouldLog(LevelWarn) {
-		fmt.Fprintf(os.Stderr, "[WARN] "+format+"\n", args...)
+		timestamp := time.Now().Format(time.RFC3339)
+		msg := fmt.Sprintf("[%s] [WARN] "+format+"\n", append([]interface{}{timestamp}, args...)...)
+		mu.Lock()
+		fmt.Fprint(os.Stderr, msg)
+		logFile.Write([]byte(msg))
+		mu.Unlock()
 	}
 }
 
 // error prints error-level messages
 func errorf(format string, args ...interface{}) {
 	if shouldLog(LevelError) {
-		fmt.Fprintf(os.Stderr, "[ERROR] "+format+"\n", args...)
+		timestamp := time.Now().Format(time.RFC3339)
+		msg := fmt.Sprintf("[%s] [ERROR] "+format+"\n", append([]interface{}{timestamp}, args...)...)
+		mu.Lock()
+		fmt.Fprint(os.Stderr, msg)
+		logFile.Write([]byte(msg))
+		mu.Unlock()
 	}
 }
 
 // critical prints critical-level messages
 func critical(format string, args ...interface{}) {
 	if shouldLog(LevelCritical) {
-		fmt.Fprintf(os.Stderr, "[CRITICAL] "+format+"\n", args...)
+		timestamp := time.Now().Format(time.RFC3339)
+		msg := fmt.Sprintf("[%s] [CRITICAL] "+format+"\n", append([]interface{}{timestamp}, args...)...)
+		mu.Lock()
+		fmt.Fprint(os.Stderr, msg)
+		logFile.Write([]byte(msg))
+		mu.Unlock()
 	}
 }

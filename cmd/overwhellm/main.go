@@ -18,6 +18,7 @@ type Config struct {
 	UpstreamURL string `json:"upstream_url"`
 	Timeout     int    `json:"timeout"`
 	LogLevel    string `json:"log_level"`
+	LogFile     string `json:"log_file"`
 }
 
 const (
@@ -179,6 +180,7 @@ func main() {
 	upstreamURL := flag.String("upstream-url", "", "Upstream LLM URL")
 	timeout := flag.Int("timeout", 0, "HTTP client timeout in seconds")
 	logLevel := flag.String("log-level", "", "Log level (TRACE, DEBUG, INFO, WARN, ERROR, CRITICAL)")
+	logFile := flag.String("log-file", "", "Log file path")
 	flag.Parse()
 
 	// Apply configuration with priority: CLI > config.json > .env > defaults
@@ -210,8 +212,16 @@ func main() {
 		finalLogLevel = getEnv("LOG_LEVEL", "INFO")
 	}
 
-	// Set log level
+	finalLogFile := *logFile
+	if finalLogFile == "" && config.LogFile != "" {
+		finalLogFile = config.LogFile
+	} else if finalLogFile == "" {
+		finalLogFile = getEnv("LOG_FILE", "overwhellm.log")
+	}
+
+	// Set log level and file
 	proxy.SetLogLevel(finalLogLevel)
+	proxy.SetLogFile(finalLogFile)
 
 	// Create proxy with configured timeout
 	p := proxy.New(finalUpstream, finalTimeout)
@@ -232,11 +242,31 @@ func main() {
 	}
 
 	fmt.Println()
+	fmt.Printf("%s", colorCyan)
+	banner := `
+   _____  _____  _____  _____  _____  _______  _____ 
+  / ____|/ ____|/ ____|/ ____|/ ____|/ ____\ \   / / 
+ | (___ | |    | |    | |    | |    | |     \ V /  
+  \___ \| |    | |    | |    | |    | |      \ /   
+  ____) | |____| |____| |____| |____| |____  | |   
+ |_____/ \_____|\______|\______\______\_____| |_|   
+                                                   
+                _____  _____ 
+               |  __ \|  __ \
+               | |  | | |  | |
+               | |  | | |  | |
+               | |__| | |__| |
+               |_____/|_____/
+`
+	fmt.Print(banner)
+	fmt.Printf("%s", colorReset)
+	fmt.Println()
 	fmt.Printf("%s🚀 %soverwhellm starting...%s\n", colorGreen, colorBold, colorReset)
 	fmt.Printf("%s   Listen:%s :%s%s%s\n", colorBlue, colorReset, colorBold, finalPort, colorReset)
 	fmt.Printf("%s   Upstream:%s %s\n", colorBlue, colorReset, finalUpstream)
 	fmt.Printf("%s   Timeout:%s %d\n", colorBlue, colorReset, finalTimeout)
 	fmt.Printf("%s   Log Level:%s %s\n", colorBlue, colorReset, finalLogLevel)
+	fmt.Printf("%s   Log File:%s %s\n", colorBlue, colorReset, finalLogFile)
 	fmt.Println()
 	fmt.Printf("%sPress Ctrl+C to stop%s\n", colorCyan, colorReset)
 

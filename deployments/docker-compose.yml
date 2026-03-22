@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  overwhellm:
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile
+    ports:
+      - "9000:9000"
+    environment:
+      - PROXY_PORT=9000
+      - LLAMA_CPP_URL=http://llama-server:8080
+      - DB_PATH=/app/overwhellm.db
+    volumes:
+      - overwhellm-data:/app
+    depends_on:
+      - llama-server
+    restart: unless-stopped
+
+  llama-server:
+    image: ghcr.io/ggerganov/llama.cpp:server
+    command: >
+      -m /app/model.gguf
+      --port 8080
+      --host 0.0.0.0
+    ports:
+      - "8080:8080"
+    volumes:
+      - llama-models:/app
+    restart: unless-stopped
+
+volumes:
+  overwhellm-data:
+  llama-models:

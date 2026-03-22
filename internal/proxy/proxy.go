@@ -85,28 +85,62 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	contentType := resp.Header.Get("Content-Type")
 
 	if strings.Contains(contentType, "text/event-stream") || strings.Contains(contentType, "application/x-ndjson") {
-		w.(http.Flusher).Flush()
+		tracker := &TokenTrackingReader{
+			Body:      resp.Body,
+			StartTime: startTime,
+			done:      make(chan struct{}),
+		}
+
+		go func() {
+			buf := make([]byte, 8192)
+			for {
+				n, err := tracker.Read(buf)
+				if n > 0 {
+					w.Write(buf[:n])
+					w.(http.Flusher).Flush()
+				}
+				if err == io.EOF {
+					break
+				}
+				if err != nil {
+					break
+				}
+			}
+			tracker.Close()
+		}()
+
+		<-tracker.done
+		stats := tracker.GetStats()
+
+		fmt.Printf("[PROXY] === Request Complete ===%s\n", colorGreen, colorReset)
+		fmt.Printf("[PROXY] %sDuration:%s %.3fs\n", colorBlue, colorReset, duration.Seconds())
+		fmt.Printf("[PROXY] %sChunks:%s %d\n", colorCyan, colorReset, stats.Chunks)
+		if stats.Chunks > 1 {
+			fmt.Printf("[PROXY] %sAvg chunk duration:%s %.3fs\n", colorYellow, colorReset, stats.ChunkDurationSeconds)
+			fmt.Printf("[PROXY] %sChunks/sec:%s %.2f\n", colorMagenta, colorReset, stats.ChunksPerSecond)
+		}
+
+		if stats.TotalTokens > 0 {
+			fmt.Printf("[PROXY] %sTokens:%s %d total (%d prompt + %d completion)\n", colorCyan, colorReset, stats.TotalTokens, stats.PromptTokens, stats.CompletionTokens)
+			fmt.Printf("[PROXY] %sSpeed:%s %.2f tokens/sec\n", colorMagenta, colorReset, stats.TokensPerSecond)
+		}
+		fmt.Printf("[PROXY] %sStatus:%s %d\n", colorBlue, colorReset, resp.StatusCode)
+		return
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		fmt.Printf("[PROXY]%s === Error reading response ===%s\n", colorRed, colorReset)
+		fmt.Printf("[PROXY] === Error reading response ===%s\n", colorReset)
 		fmt.Printf("[PROXY] %sError:%s %v\n", colorRed, colorReset, err)
 		return
 	}
 
 	w.Write(body)
 
-	fmt.Printf("[PROXY]%s === Request Complete ===%s\n", colorGreen, colorReset)
+	fmt.Printf("[PROXY] === Request Complete ===%s\n", colorGreen, colorReset)
 	fmt.Printf("[PROXY] %sDuration:%s %.3fs\n", colorBlue, colorReset, duration.Seconds())
 
-	var stats *TokenStats
-	if strings.Contains(contentType, "text/event-stream") || strings.Contains(contentType, "application/x-ndjson") {
-		stats, _ = ParseStreamingTokenUsage(strings.NewReader(string(body)))
-	} else {
-		stats, _ = ParseTokenUsageFromBytes(body)
-	}
-
+	stats, _ := ParseTokenUsageFromBytes(body)
 	if stats != nil && stats.TotalTokens > 0 {
 		fmt.Printf("[PROXY] %sTokens:%s %d total (%d prompt + %d completion)\n", colorCyan, colorReset, stats.TotalTokens, stats.PromptTokens, stats.CompletionTokens)
 		tokensPerSec := float64(stats.TotalTokens) / duration.Seconds()

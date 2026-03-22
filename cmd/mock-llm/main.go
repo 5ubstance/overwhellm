@@ -11,6 +11,16 @@ import (
 	"time"
 )
 
+const (
+	colorReset  = "\033[0m"
+	colorGreen  = "\033[32m"
+	colorBlue   = "\033[34m"
+	colorYellow = "\033[33m"
+	colorRed    = "\033[31m"
+	colorCyan   = "\033[36m"
+	colorBold   = "\033[1m"
+)
+
 func main() {
 	port := flag.String("port", getEnv("PORT", "9090"), "Mock server port")
 	flag.Parse()
@@ -25,11 +35,11 @@ func main() {
 	}
 
 	fmt.Println()
-	fmt.Println("🎭 Mock LLM Server starting...")
-	fmt.Println("   Listen: :" + *port)
-	fmt.Println("   Endpoint: /v1/models")
+	fmt.Printf("%s🎭 %sMock LLM Server starting...%s\n", colorGreen, colorBold, colorReset)
+	fmt.Printf("%s   Listen:%s :%s\n", colorBlue, colorReset, colorBold+*port+colorReset)
+	fmt.Printf("%s   Endpoint:%s %s/v1/models%s\n", colorBlue, colorReset, colorCyan, colorReset)
 	fmt.Println()
-	fmt.Println("Press Ctrl+C to stop")
+	fmt.Printf("%sPress Ctrl+C to stop%s\n", colorCyan, colorReset)
 
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("Server failed: %v", err)
@@ -57,7 +67,7 @@ func handleModels(w http.ResponseWriter, r *http.Request) {
 
 	body, err := json.Marshal(response)
 	if err != nil {
-		log.Printf("[MOCK] Error marshaling response: %v", err)
+		log.Printf("[MOCK]%s Error marshaling response:%s %v", colorRed, colorReset, err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -67,7 +77,7 @@ func handleModels(w http.ResponseWriter, r *http.Request) {
 	w.Write(body)
 
 	duration := time.Since(startTime)
-	log.Printf("[MOCK] %s %s -> 200 OK (%.3fs)", r.Method, r.URL.Path, duration.Seconds())
+	log.Printf("[MOCK]%s %s %s-> 200 OK%s (%.3fs)", colorBlue, r.Method, colorGreen, colorReset, duration.Seconds())
 }
 
 func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
@@ -82,13 +92,13 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	var reqMap map[string]interface{}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Printf("[MOCK] Error reading request body: %v", err)
+		log.Printf("[MOCK]%s Error reading request body:%s %v", colorRed, colorReset, err)
 		http.Error(w, "Bad request", http.StatusBadRequest)
 		return
 	}
 
 	if err := json.Unmarshal(body, &reqMap); err != nil {
-		log.Printf("[MOCK] Error parsing JSON: %v", err)
+		log.Printf("[MOCK]%s Error parsing JSON:%s %v", colorRed, colorReset, err)
 		http.Error(w, "Bad request", http.StatusBadRequest)
 		return
 	}
@@ -125,7 +135,7 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	respBody, err := json.Marshal(response)
 	if err != nil {
-		log.Printf("[MOCK] Error marshaling response: %v", err)
+		log.Printf("[MOCK]%s Error marshaling response:%s %v", colorRed, colorReset, err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -135,7 +145,7 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	w.Write(respBody)
 
 	duration := time.Since(startTime)
-	log.Printf("[MOCK] %s %s -> 200 OK (%.3fs)", r.Method, r.URL.Path, duration.Seconds())
+	log.Printf("[MOCK]%s %s %s-> 200 OK%s (%.3fs)", colorBlue, r.Method, colorGreen, colorReset, duration.Seconds())
 }
 
 func getEnv(key, defaultValue string) string {

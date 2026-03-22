@@ -9,6 +9,17 @@ import (
 	"time"
 )
 
+const (
+	colorReset   = "\033[0m"
+	colorGreen   = "\033[32m"
+	colorBlue    = "\033[34m"
+	colorYellow  = "\033[33m"
+	colorRed     = "\033[31m"
+	colorCyan    = "\033[36m"
+	colorBold    = "\033[1m"
+	colorMagenta = "\033[35m"
+)
+
 // Proxy represents the HTTP proxy
 type Proxy struct {
 	client       *http.Client
@@ -19,7 +30,7 @@ type Proxy struct {
 // New creates a new proxy instance with configurable timeout
 func New(targetURL string, timeoutSeconds int) *Proxy {
 	timeout := time.Duration(timeoutSeconds) * time.Second
-	log.Printf("[PROXY] Initialized with timeout: %d seconds", timeoutSeconds)
+	fmt.Printf("[PROXY]%s Initialized with timeout:%s %d seconds\n", colorBlue, colorReset, timeoutSeconds)
 	return &Proxy{
 		client: &http.Client{
 			Timeout: timeout,
@@ -34,14 +45,13 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	startTime := time.Now()
 	clientIP := getClientIP(r)
 
-	log.Printf("[PROXY] === Request Start ===")
-	log.Printf("[PROXY] Method: %s", r.Method)
-	log.Printf("[PROXY] Path: %s", r.URL.Path)
-	log.Printf("[PROXY] Client IP: %s", clientIP)
-	log.Printf("[PROXY] User Agent: %s", r.UserAgent())
-	log.Printf("[PROXY] Target URL: %s", p.targetURL)
+	fmt.Printf("[PROXY]%s === Request Start ===%s\n", colorCyan, colorReset)
+	fmt.Printf("[PROXY] %sMethod:%s %s\n", colorBlue, colorReset, r.Method)
+	fmt.Printf("[PROXY] %sPath:%s %s\n", colorBlue, colorReset, r.URL.Path)
+	fmt.Printf("[PROXY] %sClient IP:%s %s\n", colorBlue, colorReset, clientIP)
+	fmt.Printf("[PROXY] %sUser Agent:%s %s\n", colorBlue, colorReset, r.UserAgent())
+	fmt.Printf("[PROXY] %sTarget URL:%s %s\n", colorBlue, colorReset, p.targetURL)
 
-	// Forward the request
 	newReq, err := p.forwardRequest(r)
 	if err != nil {
 		log.Printf("[PROXY] === Request Failed ===")
@@ -50,66 +60,85 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("[PROXY] Forwarding to: %s", newReq.URL.String())
-	log.Printf("[PROXY] === Request Sent ===")
+	fmt.Printf("[PROXY] %sForwarding to:%s %s\n", colorBlue, colorReset, newReq.URL.String())
+	fmt.Printf("[PROXY]%s === Request Sent ===%s\n", colorCyan, colorReset)
 
 	resp, err := p.client.Do(newReq)
 	if err != nil {
-		log.Printf("[PROXY] === Request Failed ===")
-		log.Printf("[PROXY] Error from upstream: %v", err)
+		fmt.Printf("[PROXY]%s === Request Failed ===%s\n", colorRed, colorReset)
+		fmt.Printf("[PROXY] %sError from upstream:%s %v\n", colorRed, colorReset, err)
 		http.Error(w, fmt.Sprintf("Failed to forward request: %v", err), http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
 
-	log.Printf("[PROXY] === Response Received ===")
-	log.Printf("[PROXY] Status: %d", resp.StatusCode)
+	fmt.Printf("[PROXY]%s === Response Received ===%s\n", colorCyan, colorReset)
+	fmt.Printf("[PROXY] %sStatus:%s %d\n", colorBlue, colorReset, resp.StatusCode)
 
-	// Copy response headers
 	for key := range resp.Header {
 		w.Header().Set(key, resp.Header.Get(key))
 	}
 
 	w.WriteHeader(resp.StatusCode)
 
-	// Stream response body
-	_, err = io.Copy(w, resp.Body)
+	duration := time.Since(startTime)
+	contentType := resp.Header.Get("Content-Type")
+
+	if strings.Contains(contentType, "text/event-stream") || strings.Contains(contentType, "application/x-ndjson") {
+		w.(http.Flusher).Flush()
+	}
+
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Printf("[PROXY] === Error copying response ===")
-		log.Printf("[PROXY] Error: %v", err)
+		fmt.Printf("[PROXY]%s === Error reading response ===%s\n", colorRed, colorReset)
+		fmt.Printf("[PROXY] %sError:%s %v\n", colorRed, colorReset, err)
 		return
 	}
 
-	duration := time.Since(startTime)
-	log.Printf("[PROXY] === Request Complete ===")
-	log.Printf("[PROXY] Duration: %.3fs", duration.Seconds())
-	log.Printf("[PROXY] Status: %d", resp.StatusCode)
+	w.Write(body)
+
+	fmt.Printf("[PROXY]%s === Request Complete ===%s\n", colorGreen, colorReset)
+	fmt.Printf("[PROXY] %sDuration:%s %.3fs\n", colorBlue, colorReset, duration.Seconds())
+
+	var stats *TokenStats
+	if strings.Contains(contentType, "text/event-stream") || strings.Contains(contentType, "application/x-ndjson") {
+		stats, _ = ParseStreamingTokenUsage(strings.NewReader(string(body)))
+	} else {
+		stats, _ = ParseTokenUsageFromBytes(body)
+	}
+
+	if stats != nil && stats.TotalTokens > 0 {
+		fmt.Printf("[PROXY] %sTokens:%s %d total (%d prompt + %d completion)\n", colorCyan, colorReset, stats.TotalTokens, stats.PromptTokens, stats.CompletionTokens)
+		tokensPerSec := float64(stats.TotalTokens) / duration.Seconds()
+		fmt.Printf("[PROXY] %sSpeed:%s %.2f tokens/sec\n", colorMagenta, colorReset, tokensPerSec)
+	}
+	fmt.Printf("[PROXY] %sStatus:%s %d\n", colorBlue, colorReset, resp.StatusCode)
 }
 
 // forwardRequest creates a new request to the upstream server
 func (p *Proxy) forwardRequest(r *http.Request) (*http.Request, error) {
-	log.Printf("[PROXY] Processing request...")
-	log.Printf("[PROXY] Original URL: %s", r.URL.String())
+	fmt.Printf("[PROXY] %sProcessing request...%s\n", colorCyan, colorReset)
+	fmt.Printf("[PROXY] %sOriginal URL:%s %s\n", colorBlue, colorReset, r.URL.String())
 
 	// Strip /proxy prefix if present
 	targetPath := r.URL.Path
 	if strings.HasPrefix(targetPath, p.targetPrefix) {
 		targetPath = strings.TrimPrefix(targetPath, p.targetPrefix)
-		log.Printf("[PROXY] Stripped prefix, new path: %s", targetPath)
+		fmt.Printf("[PROXY] %sStripped prefix,%s new path: %s\n", colorYellow, colorReset, targetPath)
 	}
 
 	// Construct full URL
 	targetURL := p.targetURL + targetPath
-	log.Printf("[PROXY] Constructed target URL: %s", targetURL)
+	fmt.Printf("[PROXY] %sConstructed target URL:%s %s\n", colorBlue, colorReset, targetURL)
 
 	// Create new request
 	newReq, err := http.NewRequest(r.Method, targetURL, r.Body)
 	if err != nil {
-		log.Printf("[PROXY] Error creating request: %v", err)
+		fmt.Printf("[PROXY] %sError creating request:%s %v\n", colorRed, colorReset, err)
 		return nil, err
 	}
 
-	log.Printf("[PROXY] Request method: %s", r.Method)
+	fmt.Printf("[PROXY] %sRequest method:%s %s\n", colorBlue, colorReset, r.Method)
 
 	// Copy headers (except Host)
 	headerCount := 0
@@ -119,7 +148,7 @@ func (p *Proxy) forwardRequest(r *http.Request) (*http.Request, error) {
 			headerCount++
 		}
 	}
-	log.Printf("[PROXY] Copied %d headers (excluding Host and Content-Length)", headerCount)
+	fmt.Printf("[PROXY] %sCopied %d headers (excluding Host and Content-Length)\n", colorBlue, headerCount)
 
 	// Set X-Forwarded-For header
 	newReq.Header.Set("X-Forwarded-For", getClientIP(r))

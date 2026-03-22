@@ -12,6 +12,16 @@ import (
 	"overwhellm/internal/proxy"
 )
 
+const (
+	colorReset  = "\033[0m"
+	colorGreen  = "\033[32m"
+	colorBlue   = "\033[34m"
+	colorYellow = "\033[33m"
+	colorRed    = "\033[31m"
+	colorCyan   = "\033[36m"
+	colorBold   = "\033[1m"
+)
+
 func loadEnvFile(path string) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -153,12 +163,12 @@ func main() {
 	}
 
 	fmt.Println()
-	fmt.Println("🚀 overwhellm starting...")
-	fmt.Println("   Listen: :" + *port)
-	fmt.Println("   Upstream: " + *upstreamURL)
-	fmt.Printf("   Timeout: %ds\n", *timeout)
+	fmt.Printf("%s🚀 %soverwhellm starting...%s\n", colorGreen, colorBold, colorReset)
+	fmt.Printf("%s   Listen:%s :%s\n", colorBlue, colorReset, colorBold+*port+colorReset)
+	fmt.Printf("%s   Upstream:%s %s\n", colorBlue, colorReset, *upstreamURL)
+	fmt.Printf("%s   Timeout:%s %ds\n", colorBlue, colorReset, colorYellow+fmt.Sprintf("%d", *timeout)+colorReset)
 	fmt.Println()
-	fmt.Println("Press Ctrl+C to stop")
+	fmt.Printf("%sPress Ctrl+C to stop%s\n", colorCyan, colorReset)
 
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("Server failed: %v", err)

@@ -13,16 +13,19 @@ import (
 
 // TokenStats tracks token usage and speed
 type TokenStats struct {
-	PromptTokens         int
-	CompletionTokens     int
-	TotalTokens          int
-	Duration             float64
-	TokensPerSecond      float64
-	StreamingStartTime   time.Time
-	LastChunkTime        time.Time
-	Chunks               int
-	ChunkDurationSeconds float64
-	ChunksPerSecond      float64
+	PromptTokens       int
+	CompletionTokens   int
+	TotalTokens        int
+	TotalDuration      time.Duration
+	GenerationDuration time.Duration
+	TokensPerSecond    float64
+	Chunks             int
+	ChunksPerSecond    float64
+	FirstChunkTime     time.Time
+	LastChunkTime      time.Time
+	TotalBytes         int
+	BytesPerSecond     float64
+	EstimatedTokens    int
 }
 
 // TokenTrackingReader wraps a response body to track tokens in real-time
@@ -33,9 +36,11 @@ type TokenTrackingReader struct {
 	TotalTokens      int
 	mu               sync.Mutex
 	StartTime        time.Time
+	FirstChunkTime   time.Time
 	done             chan struct{}
 	Chunks           int
 	LastChunkTime    time.Time
+	TotalBytes       int
 }
 
 // Read reads from the underlying body and tracks tokens in real-time
@@ -43,14 +48,18 @@ func (r *TokenTrackingReader) Read(p []byte) (n int, err error) {
 	n, err = r.Body.Read(p)
 	if n > 0 {
 		r.mu.Lock()
+		r.TotalBytes += n
 		now := time.Now()
 		if r.StartTime.IsZero() {
 			r.StartTime = now
 		}
+		if r.FirstChunkTime.IsZero() {
+			r.FirstChunkTime = now
+		}
 		r.Chunks++
 		if !r.LastChunkTime.IsZero() {
 			chunkDuration := now.Sub(r.LastChunkTime).Seconds()
-			fmt.Printf("[PROXY] \033[36mChunk %d:\033[0m %.3fs since last chunk\n", r.Chunks, chunkDuration)
+			fmt.Printf("[PROXY] \033[36mChunk %d:\033[0m %.3fs, %d bytes\n", r.Chunks, chunkDuration, n)
 		}
 		r.LastChunkTime = now
 		r.trackTokensInBuffer(p[:n])
@@ -112,26 +121,44 @@ func (r *TokenTrackingReader) GetStats() *TokenStats {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	duration := time.Since(r.StartTime).Seconds()
-	tokensPerSecond := float64(r.TotalTokens) / duration
-	var chunkDuration float64
-	var chunksPerSecond float64
-	if r.Chunks > 1 {
-		chunkDuration = duration / float64(r.Chunks-1)
-		chunksPerSecond = float64(r.Chunks) / duration
+	totalDuration := time.Since(r.StartTime)
+	var generationDuration time.Duration
+	if !r.FirstChunkTime.IsZero() {
+		generationDuration = time.Since(r.FirstChunkTime)
 	}
 
+	var tokensPerSecond float64
+	if generationDuration > 0 && r.TotalTokens > 0 {
+		tokensPerSecond = float64(r.TotalTokens) / generationDuration.Seconds()
+	}
+
+	var chunksPerSecond float64
+	if generationDuration > 0 {
+		chunksPerSecond = float64(r.Chunks) / generationDuration.Seconds()
+	}
+
+	var bytesPerSecond float64
+	if generationDuration > 0 {
+		bytesPerSecond = float64(r.TotalBytes) / generationDuration.Seconds()
+	}
+
+	// Rough estimate: ~4 chars = 1 token, assuming average token ~3 chars + whitespace
+	estimatedTokens := r.TotalBytes / 4
+
 	return &TokenStats{
-		PromptTokens:         r.PromptTokens,
-		CompletionTokens:     r.CompletionTokens,
-		TotalTokens:          r.TotalTokens,
-		Duration:             duration,
-		TokensPerSecond:      tokensPerSecond,
-		StreamingStartTime:   r.StartTime,
-		LastChunkTime:        r.LastChunkTime,
-		Chunks:               r.Chunks,
-		ChunkDurationSeconds: chunkDuration,
-		ChunksPerSecond:      chunksPerSecond,
+		PromptTokens:       r.PromptTokens,
+		CompletionTokens:   r.CompletionTokens,
+		TotalTokens:        r.TotalTokens,
+		TotalDuration:      totalDuration,
+		GenerationDuration: generationDuration,
+		TokensPerSecond:    tokensPerSecond,
+		Chunks:             r.Chunks,
+		ChunksPerSecond:    chunksPerSecond,
+		FirstChunkTime:     r.FirstChunkTime,
+		LastChunkTime:      r.LastChunkTime,
+		TotalBytes:         r.TotalBytes,
+		BytesPerSecond:     bytesPerSecond,
+		EstimatedTokens:    estimatedTokens,
 	}
 }
 

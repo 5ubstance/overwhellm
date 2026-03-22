@@ -164,9 +164,9 @@ func main() {
 
 	fmt.Println()
 	fmt.Printf("%s🚀 %soverwhellm starting...%s\n", colorGreen, colorBold, colorReset)
-	fmt.Printf("%s   Listen:%s :%s\n", colorBlue, colorReset, colorBold+*port+colorReset)
+	fmt.Printf("%s   Listen:%s :%s%s%s\n", colorBlue, colorReset, colorBold, *port, colorReset)
 	fmt.Printf("%s   Upstream:%s %s\n", colorBlue, colorReset, *upstreamURL)
-	fmt.Printf("%s   Timeout:%s %ds\n", colorBlue, colorReset, colorYellow+fmt.Sprintf("%d", *timeout)+colorReset)
+	fmt.Printf("%s   Timeout:%s %d\n", colorBlue, colorReset, *timeout)
 	fmt.Println()
 	fmt.Printf("%sPress Ctrl+C to stop%s\n", colorCyan, colorReset)
 

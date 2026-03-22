@@ -30,7 +30,7 @@ type Proxy struct {
 // New creates a new proxy instance with configurable timeout
 func New(targetURL string, timeoutSeconds int) *Proxy {
 	timeout := time.Duration(timeoutSeconds) * time.Second
-	fmt.Printf("[PROXY]%s Initialized with timeout:%s %d seconds\n", colorBlue, colorReset, timeoutSeconds)
+	fmt.Printf("[PROXY] %sInitialized with timeout:%s %d seconds\n", colorBlue, colorReset, timeoutSeconds)
 	return &Proxy{
 		client: &http.Client{
 			Timeout: timeout,
@@ -45,7 +45,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	startTime := time.Now()
 	clientIP := getClientIP(r)
 
-	fmt.Printf("[PROXY]%s === Request Start ===%s\n", colorCyan, colorReset)
+	fmt.Printf("[PROXY] %s=== Request Start ===%s\n", colorCyan, colorReset)
 	fmt.Printf("[PROXY] %sMethod:%s %s\n", colorBlue, colorReset, r.Method)
 	fmt.Printf("[PROXY] %sPath:%s %s\n", colorBlue, colorReset, r.URL.Path)
 	fmt.Printf("[PROXY] %sClient IP:%s %s\n", colorBlue, colorReset, clientIP)
@@ -61,18 +61,18 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fmt.Printf("[PROXY] %sForwarding to:%s %s\n", colorBlue, colorReset, newReq.URL.String())
-	fmt.Printf("[PROXY]%s === Request Sent ===%s\n", colorCyan, colorReset)
+	fmt.Printf("[PROXY] %s=== Request Sent ===%s\n", colorCyan, colorReset)
 
 	resp, err := p.client.Do(newReq)
 	if err != nil {
-		fmt.Printf("[PROXY]%s === Request Failed ===%s\n", colorRed, colorReset)
+		fmt.Printf("[PROXY] %s=== Request Failed ===%s\n", colorRed, colorReset)
 		fmt.Printf("[PROXY] %sError from upstream:%s %v\n", colorRed, colorReset, err)
 		http.Error(w, fmt.Sprintf("Failed to forward request: %v", err), http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
 
-	fmt.Printf("[PROXY]%s === Response Received ===%s\n", colorCyan, colorReset)
+	fmt.Printf("[PROXY] %s=== Response Received ===%s\n", colorCyan, colorReset)
 	fmt.Printf("[PROXY] %sStatus:%s %d\n", colorBlue, colorReset, resp.StatusCode)
 
 	for key := range resp.Header {
@@ -112,13 +112,15 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		<-tracker.done
 		stats := tracker.GetStats()
 
-		fmt.Printf("[PROXY] === Request Complete ===%s\n", colorGreen, colorReset)
-		fmt.Printf("[PROXY] %sDuration:%s %.3fs\n", colorBlue, colorReset, duration.Seconds())
+		fmt.Printf("[PROXY] %s=== Request Complete ===%s\n", colorGreen, colorReset)
+		fmt.Printf("[PROXY] %sDuration:%s %.3fs\n", colorBlue, colorReset, stats.TotalDuration.Seconds())
+		fmt.Printf("[PROXY] %sGen time:%s %.3fs\n", colorYellow, colorReset, stats.GenerationDuration.Seconds())
 		fmt.Printf("[PROXY] %sChunks:%s %d\n", colorCyan, colorReset, stats.Chunks)
 		if stats.Chunks > 1 {
-			fmt.Printf("[PROXY] %sAvg chunk duration:%s %.3fs\n", colorYellow, colorReset, stats.ChunkDurationSeconds)
 			fmt.Printf("[PROXY] %sChunks/sec:%s %.2f\n", colorMagenta, colorReset, stats.ChunksPerSecond)
 		}
+		fmt.Printf("[PROXY] %sBytes:%s %d (%.2f B/s)\n", colorBlue, colorReset, stats.TotalBytes, stats.BytesPerSecond)
+		fmt.Printf("[PROXY] %sEst tokens:%s %d\n", colorBlue, colorReset, stats.EstimatedTokens)
 
 		if stats.TotalTokens > 0 {
 			fmt.Printf("[PROXY] %sTokens:%s %d total (%d prompt + %d completion)\n", colorCyan, colorReset, stats.TotalTokens, stats.PromptTokens, stats.CompletionTokens)
@@ -137,7 +139,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	w.Write(body)
 
-	fmt.Printf("[PROXY] === Request Complete ===%s\n", colorGreen, colorReset)
+	fmt.Printf("[PROXY] %s=== Request Complete ===%s\n", colorGreen, colorReset)
 	fmt.Printf("[PROXY] %sDuration:%s %.3fs\n", colorBlue, colorReset, duration.Seconds())
 
 	stats, _ := ParseTokenUsageFromBytes(body)

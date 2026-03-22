@@ -1,9 +1,10 @@
 package proxy
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -30,7 +31,8 @@ type Proxy struct {
 // New creates a new proxy instance with configurable timeout
 func New(targetURL string, timeoutSeconds int) *Proxy {
 	timeout := time.Duration(timeoutSeconds) * time.Second
-	fmt.Printf("[PROXY] %sInitialized with timeout:%s %d seconds\n", colorBlue, colorReset, timeoutSeconds)
+	info("%sInitialized with timeout:%s %d seconds", colorBlue, colorReset, timeoutSeconds)
+	info("%sTarget URL:%s %s", colorBlue, colorReset, targetURL)
 	return &Proxy{
 		client: &http.Client{
 			Timeout: timeout,
@@ -45,35 +47,35 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	startTime := time.Now()
 	clientIP := getClientIP(r)
 
-	fmt.Printf("[PROXY] %s=== Request Start ===%s\n", colorCyan, colorReset)
-	fmt.Printf("[PROXY] %sMethod:%s %s\n", colorBlue, colorReset, r.Method)
-	fmt.Printf("[PROXY] %sPath:%s %s\n", colorBlue, colorReset, r.URL.Path)
-	fmt.Printf("[PROXY] %sClient IP:%s %s\n", colorBlue, colorReset, clientIP)
-	fmt.Printf("[PROXY] %sUser Agent:%s %s\n", colorBlue, colorReset, r.UserAgent())
-	fmt.Printf("[PROXY] %sTarget URL:%s %s\n", colorBlue, colorReset, p.targetURL)
+	debug("%s=== Request Start ===%s", colorCyan, colorReset)
+	debug("%sMethod:%s %s", colorBlue, colorReset, r.Method)
+	debug("%sPath:%s %s", colorBlue, colorReset, r.URL.Path)
+	debug("%sClient IP:%s %s", colorBlue, colorReset, clientIP)
+	debug("%sUser Agent:%s %s", colorBlue, colorReset, r.UserAgent())
+	debug("%sTarget URL:%s %s", colorBlue, colorReset, p.targetURL)
 
 	newReq, err := p.forwardRequest(r)
 	if err != nil {
-		log.Printf("[PROXY] === Request Failed ===")
-		log.Printf("[PROXY] Error creating request: %v", err)
+		errorf("[PROXY] === Request Failed ===")
+		errorf("[PROXY] Error creating request: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to create forward request: %v", err), http.StatusBadGateway)
 		return
 	}
 
-	fmt.Printf("[PROXY] %sForwarding to:%s %s\n", colorBlue, colorReset, newReq.URL.String())
-	fmt.Printf("[PROXY] %s=== Request Sent ===%s\n", colorCyan, colorReset)
+	debug("%sForwarding to:%s %s", colorBlue, colorReset, newReq.URL.String())
+	debug("%s=== Request Sent ===%s", colorCyan, colorReset)
 
 	resp, err := p.client.Do(newReq)
 	if err != nil {
-		fmt.Printf("[PROXY] %s=== Request Failed ===%s\n", colorRed, colorReset)
-		fmt.Printf("[PROXY] %sError from upstream:%s %v\n", colorRed, colorReset, err)
+		errorf("%s=== Request Failed ===%s", colorRed, colorReset)
+		errorf("%sError from upstream:%s %v", colorRed, colorReset, err)
 		http.Error(w, fmt.Sprintf("Failed to forward request: %v", err), http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
 
-	fmt.Printf("[PROXY] %s=== Response Received ===%s\n", colorCyan, colorReset)
-	fmt.Printf("[PROXY] %sStatus:%s %d\n", colorBlue, colorReset, resp.StatusCode)
+	debug("%s=== Response Received ===%s", colorCyan, colorReset)
+	debug("%sStatus:%s %d", colorBlue, colorReset, resp.StatusCode)
 
 	for key := range resp.Header {
 		w.Header().Set(key, resp.Header.Get(key))
@@ -112,69 +114,81 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		<-tracker.done
 		stats := tracker.GetStats()
 
-		fmt.Printf("[PROXY] %s=== Request Complete ===%s\n", colorGreen, colorReset)
-		fmt.Printf("[PROXY] %sDuration:%s %.3fs\n", colorBlue, colorReset, stats.TotalDuration.Seconds())
-		fmt.Printf("[PROXY] %sGen time:%s %.3fs\n", colorYellow, colorReset, stats.GenerationDuration.Seconds())
-		fmt.Printf("[PROXY] %sChunks:%s %d\n", colorCyan, colorReset, stats.Chunks)
-		if stats.Chunks > 1 {
-			fmt.Printf("[PROXY] %sChunks/sec:%s %.2f\n", colorMagenta, colorReset, stats.ChunksPerSecond)
+		info("%s=== Request Complete ===%s", colorGreen, colorReset)
+		info("%sTotal duration:%s %.3fs", colorBlue, colorReset, stats.TotalDuration.Seconds())
+		if stats.GenerationDuration > 0 {
+			info("%sGeneration time:%s %.3fs", colorYellow, colorReset, stats.GenerationDuration.Seconds())
 		}
-		fmt.Printf("[PROXY] %sBytes:%s %d (%.2f B/s)\n", colorBlue, colorReset, stats.TotalBytes, stats.BytesPerSecond)
-		fmt.Printf("[PROXY] %sEst tokens:%s %d\n", colorBlue, colorReset, stats.EstimatedTokens)
+		info("%sChunks:%s %d", colorCyan, colorReset, stats.Chunks)
+		if stats.Chunks > 1 && stats.GenerationDuration > 0 {
+			info("%sChunks/sec:%s %.2f", colorMagenta, colorReset, stats.ChunksPerSecond)
+		}
 
-		if stats.TotalTokens > 0 {
-			fmt.Printf("[PROXY] %sTokens:%s %d total (%d prompt + %d completion)\n", colorCyan, colorReset, stats.TotalTokens, stats.PromptTokens, stats.CompletionTokens)
-			fmt.Printf("[PROXY] %sSpeed:%s %.2f tokens/sec\n", colorMagenta, colorReset, stats.TokensPerSecond)
+		if stats.CompletionTokens > 0 {
+			info("%sTokens:%s %d total (%d prompt + %d completion)", colorCyan, colorReset, stats.TotalTokens, stats.PromptTokens, stats.CompletionTokens)
+			info("%sSpeed:%s %.2f tokens/sec (completion)", colorMagenta, colorReset, stats.TokensPerSecond)
 		}
-		fmt.Printf("[PROXY] %sStatus:%s %d\n", colorBlue, colorReset, resp.StatusCode)
+		info("%sStatus:%s %d", colorBlue, colorReset, resp.StatusCode)
 		return
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		fmt.Printf("[PROXY] === Error reading response ===%s\n", colorReset)
-		fmt.Printf("[PROXY] %sError:%s %v\n", colorRed, colorReset, err)
+		errorf("[PROXY] === Error reading response ===%s", colorReset)
+		errorf("[PROXY] %sError:%s %v", colorRed, colorReset, err)
 		return
 	}
 
 	w.Write(body)
 
-	fmt.Printf("[PROXY] %s=== Request Complete ===%s\n", colorGreen, colorReset)
-	fmt.Printf("[PROXY] %sDuration:%s %.3fs\n", colorBlue, colorReset, duration.Seconds())
+	info("%s=== Request Complete ===%s", colorGreen, colorReset)
+	info("%sDuration:%s %.3fs", colorBlue, colorReset, duration.Seconds())
 
 	stats, _ := ParseTokenUsageFromBytes(body)
 	if stats != nil && stats.TotalTokens > 0 {
-		fmt.Printf("[PROXY] %sTokens:%s %d total (%d prompt + %d completion)\n", colorCyan, colorReset, stats.TotalTokens, stats.PromptTokens, stats.CompletionTokens)
-		tokensPerSec := float64(stats.TotalTokens) / duration.Seconds()
-		fmt.Printf("[PROXY] %sSpeed:%s %.2f tokens/sec\n", colorMagenta, colorReset, tokensPerSec)
+		info("%sTokens:%s %d total (%d prompt + %d completion)", colorCyan, colorReset, stats.TotalTokens, stats.PromptTokens, stats.CompletionTokens)
+		tokensPerSec := float64(stats.CompletionTokens) / duration.Seconds()
+		info("%sSpeed:%s %.2f tokens/sec (completion)", colorMagenta, colorReset, tokensPerSec)
 	}
-	fmt.Printf("[PROXY] %sStatus:%s %d\n", colorBlue, colorReset, resp.StatusCode)
+	info("%sStatus:%s %d", colorBlue, colorReset, resp.StatusCode)
 }
 
 // forwardRequest creates a new request to the upstream server
 func (p *Proxy) forwardRequest(r *http.Request) (*http.Request, error) {
-	fmt.Printf("[PROXY] %sProcessing request...%s\n", colorCyan, colorReset)
-	fmt.Printf("[PROXY] %sOriginal URL:%s %s\n", colorBlue, colorReset, r.URL.String())
+	debug("%sProcessing request...%s", colorCyan, colorReset)
+	debug("%sOriginal URL:%s %s", colorBlue, colorReset, r.URL.String())
+
+	// Show request payload at DEBUG level
+	if r.Body != nil && r.ContentLength > 0 {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		var prettyJSON bytes.Buffer
+		if err := json.Indent(&prettyJSON, bodyBytes, "", "  "); err == nil {
+			debug("%sRequest payload:%s %s", colorYellow, colorReset, colorBlue+colorBold+colorJSONHighlight(prettyJSON.String())+colorReset)
+		} else {
+			debug("%sRequest payload:%s %s", colorYellow, colorReset, string(bodyBytes))
+		}
+		r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+	}
 
 	// Strip /proxy prefix if present
 	targetPath := r.URL.Path
 	if strings.HasPrefix(targetPath, p.targetPrefix) {
 		targetPath = strings.TrimPrefix(targetPath, p.targetPrefix)
-		fmt.Printf("[PROXY] %sStripped prefix,%s new path: %s\n", colorYellow, colorReset, targetPath)
+		warn("%sStripped prefix,%s new path: %s", colorYellow, colorReset, targetPath)
 	}
 
 	// Construct full URL
 	targetURL := p.targetURL + targetPath
-	fmt.Printf("[PROXY] %sConstructed target URL:%s %s\n", colorBlue, colorReset, targetURL)
+	debug("%sConstructed target URL:%s %s", colorBlue, colorReset, targetURL)
 
 	// Create new request
 	newReq, err := http.NewRequest(r.Method, targetURL, r.Body)
 	if err != nil {
-		fmt.Printf("[PROXY] %sError creating request:%s %v\n", colorRed, colorReset, err)
+		errorf("%sError creating request:%s %v", colorRed, colorReset, err)
 		return nil, err
 	}
 
-	fmt.Printf("[PROXY] %sRequest method:%s %s\n", colorBlue, colorReset, r.Method)
+	debug("%sRequest method:%s %s", colorBlue, colorReset, r.Method)
 
 	// Copy headers (except Host)
 	headerCount := 0
@@ -184,7 +198,7 @@ func (p *Proxy) forwardRequest(r *http.Request) (*http.Request, error) {
 			headerCount++
 		}
 	}
-	fmt.Printf("[PROXY] %sCopied %d headers (excluding Host and Content-Length)\n", colorBlue, headerCount)
+	debug("%sCopied %d headers (excluding Host and Content-Length)", colorBlue, headerCount)
 
 	// Set X-Forwarded-For header
 	newReq.Header.Set("X-Forwarded-For", getClientIP(r))
@@ -199,6 +213,100 @@ func copyHeaders(dst, src http.Header) {
 			dst.Set(key, src.Get(key))
 		}
 	}
+}
+
+// colorJSONHighlight adds ANSI color codes to JSON for syntax highlighting
+func colorJSONHighlight(jsonStr string) string {
+	var result strings.Builder
+	inString := false
+	escape := false
+	i := 0
+
+	for i < len(jsonStr) {
+		ch := jsonStr[i]
+
+		if escape {
+			result.WriteByte(ch)
+			escape = false
+			i++
+			continue
+		}
+
+		if ch == '\\' && inString {
+			result.WriteString(colorReset + string(ch))
+			escape = true
+			i++
+			continue
+		}
+
+		if ch == '"' && !escape {
+			inString = !inString
+			if inString {
+				result.WriteString(colorGreen)
+			} else {
+				result.WriteString(colorReset)
+			}
+			result.WriteByte(ch)
+			i++
+			continue
+		}
+
+		if inString {
+			result.WriteByte(ch)
+			i++
+			continue
+		}
+
+		if ch == '{' || ch == '}' || ch == '[' || ch == ']' || ch == ',' {
+			result.WriteString(colorCyan)
+			result.WriteByte(ch)
+			result.WriteString(colorReset)
+			i++
+			continue
+		}
+
+		if ch == ':' {
+			result.WriteString(colorYellow)
+			result.WriteByte(ch)
+			result.WriteString(colorReset)
+			i++
+			continue
+		}
+
+		if ch == 't' && i+4 < len(jsonStr) && jsonStr[i:i+4] == "true" {
+			result.WriteString(colorMagenta + "true" + colorReset)
+			i += 4
+			continue
+		}
+
+		if ch == 'f' && i+5 < len(jsonStr) && jsonStr[i:i+5] == "false" {
+			result.WriteString(colorMagenta + "false" + colorReset)
+			i += 5
+			continue
+		}
+
+		if ch == 'n' && i+4 < len(jsonStr) && jsonStr[i:i+4] == "null" {
+			result.WriteString(colorRed + "null" + colorReset)
+			i += 4
+			continue
+		}
+
+		if (ch >= '0' && ch <= '9') || ch == '-' {
+			// Find end of number
+			j := i
+			for j < len(jsonStr) && ((jsonStr[j] >= '0' && jsonStr[j] <= '9') || jsonStr[j] == '.' || jsonStr[j] == '-' || jsonStr[j] == 'e' || jsonStr[j] == 'E') {
+				j++
+			}
+			result.WriteString(colorBold + jsonStr[i:j] + colorReset)
+			i = j
+			continue
+		}
+
+		result.WriteByte(ch)
+		i++
+	}
+
+	return result.String()
 }
 
 // getClientIP extracts the client IP from the request

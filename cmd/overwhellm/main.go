@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -11,6 +12,13 @@ import (
 
 	"overwhellm/internal/proxy"
 )
+
+type Config struct {
+	Port        string `json:"port"`
+	UpstreamURL string `json:"upstream_url"`
+	Timeout     int    `json:"timeout"`
+	LogLevel    string `json:"log_level"`
+}
 
 const (
 	colorReset  = "\033[0m"
@@ -44,6 +52,22 @@ func loadEnvFile(path string) {
 			}
 		}
 	}
+}
+
+func loadConfigFile(path string) (*Config, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var config Config
+	decoder := json.NewDecoder(file)
+	if err := decoder.Decode(&config); err != nil {
+		return nil, fmt.Errorf("invalid config.json: %v", err)
+	}
+
+	return &config, nil
 }
 
 func splitLines(s string) []string {
@@ -138,14 +162,59 @@ func main() {
 	// Load .env file
 	loadEnvFile(".env")
 
-	// Parse command line flags
-	port := flag.String("port", getEnv("PORT", "8080"), "Proxy server port")
-	upstreamURL := flag.String("upstream-url", getEnv("UPSTREAM_URL", "http://aspec.localdomain:12434"), "Upstream LLM URL")
-	timeout := flag.Int("timeout", getEnvInt("TIMEOUT", 60), "HTTP client timeout in seconds")
+	// Load config.json
+	config, err := loadConfigFile("config.json")
+	if err != nil {
+		if os.IsNotExist(err) {
+			config = &Config{} // Use defaults
+		} else {
+			fmt.Fprintf(os.Stderr, "Warning: Could not load config.json: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Continuing with defaults...\n")
+			config = &Config{}
+		}
+	}
+
+	// Parse command line flags (CLI overrides config.json and .env)
+	port := flag.String("port", "", "Proxy server port")
+	upstreamURL := flag.String("upstream-url", "", "Upstream LLM URL")
+	timeout := flag.Int("timeout", 0, "HTTP client timeout in seconds")
+	logLevel := flag.String("log-level", "", "Log level (TRACE, DEBUG, INFO, WARN, ERROR, CRITICAL)")
 	flag.Parse()
 
+	// Apply configuration with priority: CLI > config.json > .env > defaults
+	finalPort := *port
+	if finalPort == "" && config.Port != "" {
+		finalPort = config.Port
+	} else if finalPort == "" {
+		finalPort = getEnv("PORT", "8080")
+	}
+
+	finalUpstream := *upstreamURL
+	if finalUpstream == "" && config.UpstreamURL != "" {
+		finalUpstream = config.UpstreamURL
+	} else if finalUpstream == "" {
+		finalUpstream = getEnv("UPSTREAM_URL", "http://aspec.localdomain:12434")
+	}
+
+	finalTimeout := *timeout
+	if finalTimeout == 0 && config.Timeout > 0 {
+		finalTimeout = config.Timeout
+	} else if finalTimeout == 0 {
+		finalTimeout = getEnvInt("TIMEOUT", 60)
+	}
+
+	finalLogLevel := *logLevel
+	if finalLogLevel == "" && config.LogLevel != "" {
+		finalLogLevel = config.LogLevel
+	} else if finalLogLevel == "" {
+		finalLogLevel = getEnv("LOG_LEVEL", "INFO")
+	}
+
+	// Set log level
+	proxy.SetLogLevel(finalLogLevel)
+
 	// Create proxy with configured timeout
-	p := proxy.New(*upstreamURL, *timeout)
+	p := proxy.New(finalUpstream, finalTimeout)
 
 	// Create router
 	mux := http.NewServeMux()
@@ -156,7 +225,7 @@ func main() {
 
 	// Create server
 	server := &http.Server{
-		Addr:         ":" + *port,
+		Addr:         ":" + finalPort,
 		Handler:      mux,
 		ReadTimeout:  120 * time.Second,
 		WriteTimeout: 120 * time.Second,
@@ -164,9 +233,10 @@ func main() {
 
 	fmt.Println()
 	fmt.Printf("%s🚀 %soverwhellm starting...%s\n", colorGreen, colorBold, colorReset)
-	fmt.Printf("%s   Listen:%s :%s%s%s\n", colorBlue, colorReset, colorBold, *port, colorReset)
-	fmt.Printf("%s   Upstream:%s %s\n", colorBlue, colorReset, *upstreamURL)
-	fmt.Printf("%s   Timeout:%s %d\n", colorBlue, colorReset, *timeout)
+	fmt.Printf("%s   Listen:%s :%s%s%s\n", colorBlue, colorReset, colorBold, finalPort, colorReset)
+	fmt.Printf("%s   Upstream:%s %s\n", colorBlue, colorReset, finalUpstream)
+	fmt.Printf("%s   Timeout:%s %d\n", colorBlue, colorReset, finalTimeout)
+	fmt.Printf("%s   Log Level:%s %s\n", colorBlue, colorReset, finalLogLevel)
 	fmt.Println()
 	fmt.Printf("%sPress Ctrl+C to stop%s\n", colorCyan, colorReset)
 

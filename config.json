@@ -1,0 +1,6 @@
+{
+  "port": "8080",
+  "upstream_url": "http://aspec:12434",
+  "timeout": 60,
+  "log_level": "INFO"
+}

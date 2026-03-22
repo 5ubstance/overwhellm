@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -19,13 +18,10 @@ type TokenStats struct {
 	TotalDuration      time.Duration
 	GenerationDuration time.Duration
 	TokensPerSecond    float64
+	FirstTokenTime     time.Time
+	LastTokenTime      time.Time
 	Chunks             int
 	ChunksPerSecond    float64
-	FirstChunkTime     time.Time
-	LastChunkTime      time.Time
-	TotalBytes         int
-	BytesPerSecond     float64
-	EstimatedTokens    int
 }
 
 // TokenTrackingReader wraps a response body to track tokens in real-time
@@ -36,11 +32,10 @@ type TokenTrackingReader struct {
 	TotalTokens      int
 	mu               sync.Mutex
 	StartTime        time.Time
-	FirstChunkTime   time.Time
+	FirstTokenTime   time.Time
+	LastTokenTime    time.Time
 	done             chan struct{}
 	Chunks           int
-	LastChunkTime    time.Time
-	TotalBytes       int
 }
 
 // Read reads from the underlying body and tracks tokens in real-time
@@ -48,20 +43,19 @@ func (r *TokenTrackingReader) Read(p []byte) (n int, err error) {
 	n, err = r.Body.Read(p)
 	if n > 0 {
 		r.mu.Lock()
-		r.TotalBytes += n
 		now := time.Now()
 		if r.StartTime.IsZero() {
 			r.StartTime = now
 		}
-		if r.FirstChunkTime.IsZero() {
-			r.FirstChunkTime = now
+		if r.FirstTokenTime.IsZero() {
+			r.FirstTokenTime = now
 		}
+		r.LastTokenTime = now
 		r.Chunks++
-		if !r.LastChunkTime.IsZero() {
-			chunkDuration := now.Sub(r.LastChunkTime).Seconds()
-			fmt.Printf("[PROXY] \033[36mChunk %d:\033[0m %.3fs, %d bytes\n", r.Chunks, chunkDuration, n)
+		if !r.LastTokenTime.IsZero() {
+			chunkDuration := now.Sub(r.LastTokenTime).Seconds()
+			r.trackChunksInBuffer(p[:n], now, chunkDuration, n)
 		}
-		r.LastChunkTime = now
 		r.trackTokensInBuffer(p[:n])
 		r.mu.Unlock()
 	}
@@ -88,20 +82,24 @@ func (r *TokenTrackingReader) trackTokensInBuffer(data []byte) {
 			if dataStr == "[DONE]" {
 				continue
 			}
-			if err := r.parseUsageFromJSON([]byte(dataStr)); err != nil {
-				// Ignore parse errors, just skip
-			}
+			r.parseUsageFromJSON([]byte(dataStr))
 		}
 	}
 }
 
-// parseUsageFromJSON extracts token counts from usage object
+// trackChunksInBuffer logs chunk timing info (DEBUG level only)
+func (r *TokenTrackingReader) trackChunksInBuffer(data []byte, now time.Time, chunkDuration float64, n int) {
+	debug("[PROXY] Chunk %d: %.3fs, %d bytes", r.Chunks, chunkDuration, n)
+}
+
+// parseUsageFromJSON extracts token counts from usage or timings object
 func (r *TokenTrackingReader) parseUsageFromJSON(data []byte) error {
 	var rawJSON map[string]interface{}
 	if err := json.Unmarshal(data, &rawJSON); err != nil {
 		return err
 	}
 
+	// Try usage object first (standard OpenAI format)
 	if usage, ok := rawJSON["usage"].(map[string]interface{}); ok {
 		if tokens, ok := usage["prompt_tokens"].(float64); ok {
 			r.PromptTokens = int(tokens)
@@ -112,7 +110,20 @@ func (r *TokenTrackingReader) parseUsageFromJSON(data []byte) error {
 		if tokens, ok := usage["total_tokens"].(float64); ok {
 			r.TotalTokens = int(tokens)
 		}
+		return nil
 	}
+
+	// Fall back to timings object (vLLM-style)
+	if timings, ok := rawJSON["timings"].(map[string]interface{}); ok {
+		if promptN, ok := timings["prompt_n"].(float64); ok {
+			r.PromptTokens = int(promptN)
+		}
+		if predictedN, ok := timings["predicted_n"].(float64); ok {
+			r.CompletionTokens = int(predictedN)
+		}
+		return nil
+	}
+
 	return nil
 }
 
@@ -123,27 +134,19 @@ func (r *TokenTrackingReader) GetStats() *TokenStats {
 
 	totalDuration := time.Since(r.StartTime)
 	var generationDuration time.Duration
-	if !r.FirstChunkTime.IsZero() {
-		generationDuration = time.Since(r.FirstChunkTime)
+	if !r.FirstTokenTime.IsZero() && !r.LastTokenTime.IsZero() {
+		generationDuration = r.LastTokenTime.Sub(r.FirstTokenTime)
 	}
 
 	var tokensPerSecond float64
-	if generationDuration > 0 && r.TotalTokens > 0 {
-		tokensPerSecond = float64(r.TotalTokens) / generationDuration.Seconds()
+	if generationDuration > 0 && r.CompletionTokens > 0 {
+		tokensPerSecond = float64(r.CompletionTokens) / generationDuration.Seconds()
 	}
 
 	var chunksPerSecond float64
 	if generationDuration > 0 {
 		chunksPerSecond = float64(r.Chunks) / generationDuration.Seconds()
 	}
-
-	var bytesPerSecond float64
-	if generationDuration > 0 {
-		bytesPerSecond = float64(r.TotalBytes) / generationDuration.Seconds()
-	}
-
-	// Rough estimate: ~4 chars = 1 token, assuming average token ~3 chars + whitespace
-	estimatedTokens := r.TotalBytes / 4
 
 	return &TokenStats{
 		PromptTokens:       r.PromptTokens,
@@ -152,13 +155,10 @@ func (r *TokenTrackingReader) GetStats() *TokenStats {
 		TotalDuration:      totalDuration,
 		GenerationDuration: generationDuration,
 		TokensPerSecond:    tokensPerSecond,
+		FirstTokenTime:     r.FirstTokenTime,
+		LastTokenTime:      r.LastTokenTime,
 		Chunks:             r.Chunks,
 		ChunksPerSecond:    chunksPerSecond,
-		FirstChunkTime:     r.FirstChunkTime,
-		LastChunkTime:      r.LastChunkTime,
-		TotalBytes:         r.TotalBytes,
-		BytesPerSecond:     bytesPerSecond,
-		EstimatedTokens:    estimatedTokens,
 	}
 }
 

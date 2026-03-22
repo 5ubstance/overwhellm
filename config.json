@@ -1,7 +1,0 @@
-{
-  "port": "8080",
-  "upstream_url": "http://aspec:12434",
-  "timeout": 300,
-  "log_level": "DEBUG",
-  "log_file": "overwhellm.log"
-}

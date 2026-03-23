@@ -241,26 +241,6 @@ func main() {
 		WriteTimeout: 120 * time.Second,
 	}
 
-	fmt.Println()
-	fmt.Printf("%s", colorCyan)
-	banner := `
-   _____  _____  _____  _____  _____  _______  _____ 
-  / ____|/ ____|/ ____|/ ____|/ ____|/ ____\ \   / / 
- | (___ | |    | |    | |    | |    | |     \ V /  
-  \___ \| |    | |    | |    | |    | |      \ /   
-  ____) | |____| |____| |____| |____| |____  | |   
- |_____/ \_____|\______|\______\______\_____| |_|   
-                                                   
-                _____  _____ 
-               |  __ \|  __ \
-               | |  | | |  | |
-               | |  | | |  | |
-               | |__| | |__| |
-               |_____/|_____/
-`
-	fmt.Print(banner)
-	fmt.Printf("%s", colorReset)
-	fmt.Println()
 	fmt.Printf("%s🚀 %soverwhellm starting...%s\n", colorGreen, colorBold, colorReset)
 	fmt.Printf("%s   Listen:%s :%s%s%s\n", colorBlue, colorReset, colorBold, finalPort, colorReset)
 	fmt.Printf("%s   Upstream:%s %s\n", colorBlue, colorReset, finalUpstream)

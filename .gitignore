@@ -2,3 +2,4 @@ mock-llm
 overwhellm
 *.log
 config.json
+result

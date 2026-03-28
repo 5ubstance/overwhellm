@@ -22,6 +22,7 @@ type Config struct {
 }
 
 const (
+	Version     = "0.1.0"
 	colorReset  = "\033[0m"
 	colorGreen  = "\033[32m"
 	colorBlue   = "\033[34m"
@@ -159,6 +160,49 @@ func getEnvInt(key string, defaultValue int) int {
 	return defaultValue
 }
 
+func displayBanner(port, upstream string, timeout int, logLevel, logFile string) {
+	bannerContent, err := os.ReadFile("./banner")
+	if err != nil {
+		fmt.Println()
+		return
+	}
+
+	lines := splitLines(string(bannerContent))
+	
+	// Print banner lines with info on the right
+	fmt.Printf("%s", colorCyan)
+	for i, line := range lines {
+		// Format each line with info on the right
+		info := ""
+		switch i {
+		case 0:
+			info = fmt.Sprintf("%soverwhellm starting...%s %s%s", colorGreen, colorBold, colorReset, Version)
+		case 1:
+			info = fmt.Sprintf("%s   Listen:%s :%s%s%s", colorBlue, colorReset, colorBold, port, colorReset)
+		case 2:
+			info = fmt.Sprintf("%s   Upstream:%s %s", colorBlue, colorReset, upstream)
+		case 3:
+			info = fmt.Sprintf("%s   Timeout:%s %d", colorBlue, colorReset, timeout)
+		case 4:
+			info = fmt.Sprintf("%s   Log Level:%s %s", colorBlue, colorReset, logLevel)
+		case 5:
+			info = fmt.Sprintf("%s   Log File:%s %s", colorBlue, colorReset, logFile)
+		}
+		
+		// Pad banner line to ensure alignment
+		if len(line) < 80 {
+			fmt.Printf("%-80s%s\n", line, info)
+		} else {
+			fmt.Printf("%s\n", line)
+		}
+	}
+	fmt.Printf("%s", colorReset)
+	
+	// Print footer
+	fmt.Println()
+	fmt.Printf("%sPress Ctrl+C to stop%s\n", colorCyan, colorReset)
+}
+
 func main() {
 	// Load .env file
 	loadEnvFile(".env")
@@ -233,7 +277,7 @@ func main() {
 	mux.Handle("/proxy/", http.HandlerFunc(p.ServeHTTP))
 	mux.Handle("/", http.HandlerFunc(p.ServeHTTP))
 
-	// Create server
+// Create server
 	server := &http.Server{
 		Addr:         ":" + finalPort,
 		Handler:      mux,
@@ -241,14 +285,8 @@ func main() {
 		WriteTimeout: 120 * time.Second,
 	}
 
-	fmt.Printf("%s🚀 %soverwhellm starting...%s\n", colorGreen, colorBold, colorReset)
-	fmt.Printf("%s   Listen:%s :%s%s%s\n", colorBlue, colorReset, colorBold, finalPort, colorReset)
-	fmt.Printf("%s   Upstream:%s %s\n", colorBlue, colorReset, finalUpstream)
-	fmt.Printf("%s   Timeout:%s %d\n", colorBlue, colorReset, finalTimeout)
-	fmt.Printf("%s   Log Level:%s %s\n", colorBlue, colorReset, finalLogLevel)
-	fmt.Printf("%s   Log File:%s %s\n", colorBlue, colorReset, finalLogFile)
-	fmt.Println()
-	fmt.Printf("%sPress Ctrl+C to stop%s\n", colorCyan, colorReset)
+	// Display banner
+	displayBanner(finalPort, finalUpstream, finalTimeout, finalLogLevel, finalLogFile)
 
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("Server failed: %v", err)
